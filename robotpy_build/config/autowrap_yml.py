@@ -452,7 +452,7 @@ class TemplateData(Model):
     doc_append: Optional[str] = None
 
 
-class HooksDataYaml(Model):
+class AutowrapConfigYaml(Model):
     """
     Format of the file in [tool.robotpy-build.wrappers."PACKAGENAME"]
     generation_data
