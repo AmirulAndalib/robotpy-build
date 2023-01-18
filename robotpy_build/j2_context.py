@@ -132,11 +132,16 @@ class FunctionContext:
     #: output parameters
     out_params: typing.List[ParamContext]
 
+    cpp_return_type: str
+
     #: Marked const
     const: bool
 
     #: Has vararg parameters
     vararg: bool
+
+    #: & or && qualifiers for function
+    ref_qualifiers: str
 
     #
     # Mixed
@@ -157,6 +162,8 @@ class FunctionContext:
 
     #: Use this code instead of the generated code
     cpp_code: typing.Optional[str]
+    #: Use this code instead of the generated code in a trampoline
+    trampoline_cpp_code: typing.Optional[str]
 
     #: Generate this in an `#ifdef`
     ifdef: typing.Optional[str]
@@ -214,6 +221,9 @@ class TrampolineData:
 
 @dataclass
 class ClassContext:
+    """
+    Available in class .j2 files as `cls`
+    """
 
     parent: typing.Optional["ClassContext"]
 
@@ -221,7 +231,7 @@ class ClassContext:
     full_cpp_name: str
 
     #: Translated C++ name suitable for use as an identifier. :<>= are
-    #: turned into underscores.
+    #: turned into underscores. was: x_qualname_
     full_cpp_name_identifier: str
 
     #: Python name
@@ -258,17 +268,26 @@ class ClassContext:
     # -> to delete, only needs signature
     methods_to_disable = typing.List[FunctionContext]
 
+    # {% for fn in cls.methods.public + cls.methods.protected + cls.methods.private
+    # if not fn.data.ignore and (fn.virtual or fn.override) and not fn.final and not fn.data.buffers %}
+    virtual_methods = typing.List[FunctionContext]
+
     # pub + protected + not final + not ignore
 
     # protected + not ignore + constructor
+    protected_constructors = typing.List[FunctionContext]
 
     # public + protected + not ignore + (virtual + override) + not final + not buffers
+
+    #     {% for fn in cls.methods.protected
+    #       if not fn.data.ignore and not (fn.virtual or fn.override or fn.constructor) %}
+    non_virtual_protected_methods = typing.List[FunctionContext]
 
     # add default constructor
     # {% if not cls.x_has_constructor and not cls.data.nodelete and not cls.data.force_no_default_constructor %}
 
-    # template_params
-    #
+    # template_params, not needed?
+    # template_params: typing.Optional[typing.List[str]]
 
     # don't add protected things if trampoline not enabled
     # .. more nuance than that
@@ -290,12 +309,15 @@ class ClassContext:
     auto_typealias: typing.List[str]
 
     #: Extra constexpr to insert into the trampoline and wrapping scopes
-    constants: typing.List[str]
+    #: (name, value)
+    constants: typing.List[typing.Tuple[str, str]]
 
     #: Extra code to insert into the class scope
     inline_code: str
 
     vcheck_fns: typing.List[FunctionContext]
+
+    namespace: typing.Optional[str]
 
 
 @dataclass
@@ -320,6 +342,9 @@ class TemplateInstanceContext:
 
 @dataclass
 class HeaderContext:
+    """
+    Globals in all .j2 files
+    """
 
     extra_includes_first: typing.List[str]
     extra_includes: typing.List[str]
@@ -328,17 +353,22 @@ class HeaderContext:
     trampoline_signature: typing.Callable[[FunctionContext], str]
     using_signature: typing.Callable[[ClassContext, FunctionContext], str]
 
-    #
+    #: Path to the parsed header
     rel_fname: str = ""
 
     #: True if <pybind11/operators.h> is needed
     need_operators_h: bool = False
+
+    using_declarations: typing.List[str] = field(default_factory=list)
 
     # TODO: anon enums?
     enums: typing.List[EnumContext] = field(default_factory=list)
 
     # classes
     classes: typing.List[ClassContext] = field(default_factory=list)
+
+    # same as classes, but only those that have trampolines
+    classes_with_trampolines: typing.List[ClassContext] = field(default_factory=list)
 
     functions: typing.List[FunctionContext] = field(default_factory=list)
 

@@ -339,6 +339,10 @@ class Hooks:
 
         self.hctx.rel_fname = header["rel_fname"]
 
+        for using in header.using.values():
+            if using["using_type"] == "declaration":
+                self.hctx.using_declarations.append(using["raw_type"])
+
         for i, en in enumerate(header.enums):
             enum_data = self.gendata.get_enum_data(en.get("name"))
 
@@ -389,6 +393,8 @@ class Hooks:
         user_typealias = []
         self._extract_typealias(self.rawdata.typealias, user_typealias, set())
         self.hctx.user_typealias = user_typealias
+
+        data.update(self.hctx.__dict__)
 
     def _function_hook(
         self, fn, data: FunctionData, scope_var: str, internal: bool = False
@@ -670,6 +676,8 @@ class Hooks:
         if data.keepalive is not None:
             x_keepalives = data.keepalive
 
+        ref_qualifiers = fn.get("ref_qualifiers", "")
+
         if not self.report_only:
             if fn["template"]:
                 if data.template_impls is None and not data.cpp_code:
@@ -713,6 +721,7 @@ class Hooks:
             filtered_params=x_filtered_params,
             in_params=x_in_params,
             out_params=x_out_params,
+            cpp_return_type=fn["rtnType"],
             x_rets=x_rets,
             keepalives=x_keepalives,
             return_value_policy=x_return_value_policy,
@@ -726,9 +735,11 @@ class Hooks:
             # info
             const=fn["const"],
             vararg=fn["vararg"],
+            ref_qualifiers=ref_qualifiers,
             # user settings
             ignore_pure=data.ignore_pure,
             cpp_code=data.cpp_code,
+            trampoline_cpp_code=data.trampoline_cpp_code,
             ifdef=data.ifdef,
             ifndef=data.ifndef,
             release_gil=not data.no_release_gil,
@@ -936,6 +947,12 @@ class Hooks:
         protected_methods: typing.List[FunctionContext] = []
         private_methods: typing.List[FunctionContext] = []
 
+        # This is:
+        # - methods.public + cls.methods.protected if fn.final
+        # - cls.methods.private if fn.final or fn.override
+        methods_to_disable: typing.List[FunctionContext] = []
+        virtual_methods: typing.List[FunctionContext] = []
+
         for access, methods in (
             ("public", public_methods),
             ("protected", protected_methods),
@@ -963,6 +980,7 @@ class Hooks:
                 ):
                     continue
 
+                is_final = fn["final"]
                 is_private = access == "private"
                 is_virtual = fn["override"] or fn["virtual"]
 
@@ -994,6 +1012,10 @@ class Hooks:
                         raise HookError(f"{cls_key}::{fn['name']}") from e
                     else:
                         methods.append(fctx)
+
+                    # TODO: wrong
+                    if is_final or (is_private and is_virtual):
+                        methods_to_disable.append(fctx)
 
                     # If the method has cpp_code defined, it must either match the function
                     # signature of the method, or virtual_xform must be defined with an
@@ -1119,6 +1141,11 @@ class Hooks:
         doc = self._process_doc(cls, class_data)
         py_name = self._make_py_name(cls_name, class_data)
 
+        constants = []
+        for constant in class_data.constants:
+            name = constant.split('::')[-1]
+            constants.append((name, constant))
+
         cctx = ClassContext(
             parent=parent_ctx,
             full_cpp_name=cls_qualname,
@@ -1141,7 +1168,7 @@ class Hooks:
             template_inline_code=class_data.template_inline_code,
             user_typealias=user_typealias,
             auto_typealias=user_typealias,
-            constants=class_data.constants,
+            constants=constants,
             inline_code=class_data.inline_code or "",
             vcheck_fns=vcheck_fns,
         )
@@ -1149,3 +1176,5 @@ class Hooks:
         # store this to facilitate finding data in parent
         cls["class_ctx"] = cctx
         self.hctx.classes.append(cctx)
+        if cctx.trampoline:
+            self.hctx.classes_with_trampolines.append(cctx)
